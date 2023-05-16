@@ -1,0 +1,8 @@
+JBREM000308
+https://access.redhat.com/solutions/3642922
+For troubleshooting remote EJB invocation related issues, it's best to configured the client and server side logging to log the following log categories in TRACE level:
+- org.jboss.ejb.client
+- org.jboss.security
+- org.wildfly.security
+- org.wildfly.discovery
+
