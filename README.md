@@ -18,7 +18,7 @@ When run, yala will look for a new version to use and update itself with a simpl
 
 * To run:
 ```
- ./yala.sh server.log
+ ./yala.sh <SERVER_LOG>
 ```
 * Options:
 ```
@@ -27,5 +27,8 @@ When run, yala will look for a new version to use and update itself with a simpl
                          in the provided file take precedence over the default $HOME/.yala/config
                          file and are superseeded by command line options
  -u, --updateMode        the update mode to use, one of [force ask never], default: force
+ -s, --split             if the log file contains multiple server starts, this option
+                         will split the server.log into multiple files with the names
+                         <SERVER_LOG>.yala-split.<nn> 
  -h, --help              show this help
 ```

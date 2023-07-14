@@ -7,6 +7,18 @@
 #
 # Usage: sh ./yala.sh <SERVER_LOG>
 
+export RED='\033[0;31m'
+export BLUE='\033[0;34m'
+export GREEN='\033[0;32m'
+export YELLOW='\033[1;33m'
+export NC='\033[0m'
+
+DIR=`dirname "$(readlink -f "$0")"`
+ERRORS_DIR="$DIR/yala-errors/"
+SCRIPTS_DIR="$DIR/condition-scripts/"
+
+echo $DIR
+
 VALID_UPDATE_MODES=(force ask never)
 
 YALA_SH="$(basename "$(test -L "$0" && readlink "$0" || echo "$0")")"
@@ -32,6 +44,10 @@ usage() {
     echo "                         in the provided file take precedence over the default '\$HOME/.yala/config'"
     echo "                         file and are superseeded by command line options"
     echo " -u, --updateMode        the update mode to use, one of [${VALID_UPDATE_MODES[*]}], default: force"
+    echo " -s, --split             if the log file contains multiple server starts, this option"
+    echo "                         will split the server.log into multiple files with the names"
+    echo "                         <SERVER_LOG>.yala-split.<n> and the analyse is done on the last started"
+    echo "                         JBoss only"
     echo " -h, --help              show this help" 
 }
 
@@ -60,9 +76,11 @@ fi
 [ -z $TAR_MD5 ] && TAR_MD5="https://raw.githubusercontent.com/aogburn/yala/main/tarmd5"
 [ -z $REMOTE_YALA_SH ] && REMOTE_YALA_SH="https://raw.githubusercontent.com/aogburn/yala/main/yala.sh"
 [ -z $REMOTE_YALA_ERRORS ] && REMOTE_YALA_ERRORS="https://raw.githubusercontent.com/aogburn/yala/main/yala-errors.tar.xz"
+[ -z $SPLIT ] && SPLIT=0
+[ -z $YALA_SPLIT_NAME_SUFFIX ] && YALA_SPLIT_NAME_SUFFIX=".yala-split"
 
 # parse the cli options
-OPTS=$(getopt -o 'h,l,c:,u:' --long 'help,last,config:,updateMode:' -n "${YALA_SH}" -- "$@")
+OPTS=$(getopt -o 'h,l,s,c:,u:' --long 'help,last,split,config:,updateMode:' -n "${YALA_SH}" -- "$@")
 
 # if getopt has a returned an error, exit with the return code of getopt
 res=$?; [ $res -gt 0 ] && exit $res
@@ -77,6 +95,9 @@ while true; do
             ;;
         '-l'|'--last')
             LAST_STARTED_ONLY="true"; shift
+            ;;
+        '-s'|'--split')
+            SPLIT=1; shift
             ;;
         '-c'|'--config')
             if [ -f $HOME/.yala/$2 ]; then
@@ -104,34 +125,6 @@ while true; do
             ;;
     esac
 done
-
-# check if filename is given
-if [ $# -eq 0 ]; then
-    echo "${YALA_SH}: <SERVER_LOG> argument missing."
-    exit 22
-fi
-
-# after parsing the options, '$1' is the file name
-FILE_NAME=$1
-
-EXT=".yala"
-TRIM_FILE="$FILE_NAME$EXT-trim"
-TMP_FILE="$FILE_NAME$EXT-tmp"
-TMP_FILE2="$FILE_NAME$EXT-tmp2"
-DEST=$1$EXT
-ERROR_EXT="$EXT-errors"
-LAST_FILE="$FILE_NAME.lastOnly"
-
-export ERROR_DEST=$1$ERROR_EXT
-DIR=`dirname "$(readlink -f "$0")"`
-ERRORS_DIR="$DIR/yala-errors/"
-SCRIPTS_DIR="$DIR/condition-scripts/"
-
-export RED='\033[0;31m'
-export BLUE='\033[0;34m'
-export GREEN='\033[0;32m'
-export YELLOW='\033[1;33m'
-export NC='\033[0m'
 
 # Check for a new yala.sh and yala-errors.tar.xz if UPDATE_MODE is not 'never'
 if [ "$UPDATE_MODE" != "never" ]; then
@@ -211,6 +204,36 @@ if [ "$UPDATE_MODE" != "never" ]; then
     echo "Checks complete."
 fi
 
+# check if filename is given
+if [ $# -eq 0 ]; then
+    echo "${YALA_SH}: <SERVER_LOG> argument missing."
+    exit 22
+fi
+
+# after parsing the options, '$1' is the file name
+FILE_NAME=$1
+
+# split the given log file into separate server starts and analyse the last one
+if [ ${SPLIT} -eq 1 ]; then
+    echo -e "${YELLOW}Going to split the file '${FILE_NAME}' into '${FILE_NAME}${YALA_SPLIT_NAME_SUFFIX}.<nn>'${NC}"
+    
+    # split the given file
+    csplit -s ${FILE_NAME} --elide-empty-files --prefix ${FILE_NAME}${YALA_SPLIT_NAME_SUFFIX}. '/^.*WFLYSRV0049.*starting$/' '{*}'
+    
+    # set the last split FILE_NAME as FILE_NAME for the analysis
+    FILE_NAME=$(ls -t ${FILE_NAME}${YALA_SPLIT_NAME_SUFFIX}.* | head -1)
+fi
+
+EXT=".yala"
+TRIM_FILE="$FILE_NAME$EXT-trim"
+TMP_FILE="$FILE_NAME$EXT-tmp"
+TMP_FILE2="$FILE_NAME$EXT-tmp2"
+DEST=$FILE_NAME$EXT
+ERROR_EXT="$EXT-errors"
+LAST_FILE="$FILE_NAME.lastOnly"
+
+export ERROR_DEST=$FILE_NAME$ERROR_EXT
+
 if [ "x$FILE_NAME" = "x" ]; then
     usage "${RED}No <SERVER_LOG> provided.${NC}"
     exit
@@ -234,10 +257,10 @@ if [ ! -z $LAST_STARTED_ONLY ]; then
     sed -n '/WFLYSRV0049/h;//!H;$!d;x;//p' $FILE_NAME > $LAST_FILE
     
     # trim file of unneeded exception stack trace lines and empty lines, last server start only
-    grep -E -v " at .*\(.*\)$|	at .*\(.*\)|^$" $LAST_FILE > $TRIM_FILE
+    grep -a -E -v " at .*\(.*\)$|	at .*\(.*\)|^$" $LAST_FILE > $TRIM_FILE
 else
     #trim file of unneeded exception stack trace lines and empty lines
-    grep -E -v " at .*\(.*\)$|	at .*\(.*\)|^$" $FILE_NAME > $TRIM_FILE
+    grep -a -E -v " at .*\(.*\)$|	at .*\(.*\)|^$" $FILE_NAME > $TRIM_FILE
 fi
 
 {
@@ -250,8 +273,8 @@ echo -en "${BLUE}"
 echo -e "*** First and last timestamped lines of $FILE_NAME ***" | tee -a $DEST
 echo -en "${NC}"
 {
-head -n 1000 "$TRIM_FILE" | grep -E "^20[0-9][0-9]\-|^[0-2][0-9]:[0-5][0-9]:[0-5][0-9]" | head -n 1
-tail -n 1000 "$TRIM_FILE" | grep -E "^20[0-9][0-9]\-|^[0-2][0-9]:[0-5][0-9]:[0-5][0-9]" | tail -n 1
+head -n 1000 "$TRIM_FILE" | grep -a -E "^20[0-9][0-9]\-|^[0-2][0-9]:[0-5][0-9]:[0-5][0-9]" | head -n 1
+tail -n 1000 "$TRIM_FILE" | grep -a -E "^20[0-9][0-9]\-|^[0-2][0-9]:[0-5][0-9]:[0-5][0-9]" | tail -n 1
 echo
 }  | tee -a $DEST
 
@@ -260,12 +283,12 @@ echo -en "${BLUE}"
 echo -e "*** VM args and info of $FILE_NAME ***" | tee -a $DEST
 echo -en "${NC}"
 {
-grep "java.runtime.name =" $TRIM_FILE | uniq
-grep "java.runtime.version =" $TRIM_FILE | uniq
-grep "sun.java.command = " $TRIM_FILE | uniq
+grep -a "java.runtime.name =" $TRIM_FILE | uniq
+grep -a "java.runtime.version =" $TRIM_FILE | uniq
+grep -a "sun.java.command = " $TRIM_FILE | uniq
 echo
 echo -n "	"
-grep "DEBUG \[org.jboss.as.config\] (MSC service thread 1-[0-9]) VM Arguments: " $TRIM_FILE | sed 's/^.*VM Arguments/VMArguments/g' | uniq
+grep -a "DEBUG \[org.jboss.as.config\] (MSC service thread 1-[0-9]) VM Arguments: " $TRIM_FILE | sed 's/^.*VM Arguments/VMArguments/g' | uniq
 echo
 } | tee -a $DEST
 
@@ -291,7 +314,7 @@ echo -en "${NC}"
 # WFLYSRV0283 - disregardingNonGraceful
 # WFLYSRV0272 - suspending
 {
-grep -E "WFLYSRV0025|WFLYSRV0026|WFLYSRV0049|WFLYSRV0050|WFLYSRV0211|WFLYSRV0212|WFLYSRV0215|WFLYSRV0220|WFLYSRV0236|WFLYSRV0239|WFLYSRV0240|WFLYSRV0241|WFLYSRV0260|WFLYSRV0272|WFLYSRV0282|WFLYSRV0283" $TRIM_FILE
+grep -a -E "WFLYSRV0025|WFLYSRV0026|WFLYSRV0049|WFLYSRV0050|WFLYSRV0211|WFLYSRV0212|WFLYSRV0215|WFLYSRV0220|WFLYSRV0236|WFLYSRV0239|WFLYSRV0240|WFLYSRV0241|WFLYSRV0260|WFLYSRV0272|WFLYSRV0282|WFLYSRV0283" $TRIM_FILE
 echo
 } | tee -a $DEST
 
@@ -304,7 +327,7 @@ echo -en "${NC}"
 # WFLYUT0007 - UT listener stopped
 # WFLYUT0008 - UT listener suspending
 {
-grep -E "WFLYUT000[6-8]|WFLYSRV005[1-3]" $TRIM_FILE
+grep -a -E "WFLYUT000[6-8]|WFLYSRV005[1-3]" $TRIM_FILE
 echo
 } | tee -a $DEST
 
@@ -313,7 +336,7 @@ echo "*** Patch information of $FILE_NAME ***" | tee -a $DEST
 echo -en "${NC}"
 # WFLYPAT0050 - patch information
 {
-grep -E "WFLYPAT0050" $TRIM_FILE
+grep -a -E "WFLYPAT0050" $TRIM_FILE
 echo
 } | tee -a $DEST
 
@@ -345,7 +368,7 @@ echo -en "${NC}"
 # WFLYSRV0233 - undeployed
 # WFLYSRV0234 - deployed
 {
-grep -E "WFLYSRV000[7-9]|WFLYSRV001[0-6]|WFLYSRV002[0-2]|WFLYSRV002[7-8]|WFLYSRV0070|WFLYSRV0087|WFLYSRV0205|WFLYSRV020[7-8]|WFLYSRV0219|WFLYSRV023[3-4]" $TRIM_FILE
+grep -a -E "WFLYSRV000[7-9]|WFLYSRV001[0-6]|WFLYSRV002[0-2]|WFLYSRV002[7-8]|WFLYSRV0070|WFLYSRV0087|WFLYSRV0205|WFLYSRV020[7-8]|WFLYSRV0219|WFLYSRV023[3-4]" $TRIM_FILE
 echo
 } | tee -a $DEST
 
@@ -356,7 +379,7 @@ echo -en "${NC}"
 # WFLYUT0021 - register
 # WFLYUT0022 - unregister
 {
-grep "WFLYUT002[1-2]" $TRIM_FILE
+grep -a "WFLYUT002[1-2]" $TRIM_FILE
 echo
 } | tee -a $DEST
 
@@ -382,7 +405,7 @@ else
     for f in $ERRORS_DIR*
     do
         ERROR_STRING=`head -n 1 $f`
-        grep -E "$ERROR_STRING" $TRIM_FILE > $TMP_FILE
+        grep -a -E "$ERROR_STRING" $TRIM_FILE > $TMP_FILE
         ERROR_COUNT=`cat $TMP_FILE | wc -l`
         if [ $ERROR_COUNT -gt 0 ]; then
             echo -en "${GREEN}"
@@ -455,8 +478,7 @@ fi
 
 
 # parse out ERROR strings stripped of categories and threads
-#grep " ERROR \[" $TRIM_FILE | sed 's/^.* ERROR \[.*\] ([^)]*) //g' | sed 's/^.* ERROR \[.*] //g' > $TMP_FILE
-grep " ERROR \[" $TRIM_FILE | sed -E 's/^.* ERROR \[(.*)\] \([^)]*\) /[\1] /g' | sed -E 's/^.* ERROR \[(.*)] /[\1] /g' > $TMP_FILE
+grep -a " ERROR \[" $TRIM_FILE | sed -E 's/^.* ERROR \[(.*)\] \([^)]*\) /[\1] /g' | sed -E 's/^.* ERROR \[(.*)] /[\1] /g' > $TMP_FILE
 #count total
 ERROR_COUNT=`cat $TMP_FILE | wc -l`
 #sort and count uniques
@@ -468,7 +490,6 @@ echo "*** top 20 - see $ERROR_DEST for more ***"
 echo -en "${NC}"
 head -n 20 $TMP_FILE2
 cat $TMP_FILE2 >> $ERROR_DEST
-#grep " ERROR \[" $TRIM_FILE | sed 's/^.* ERROR \[.*\] ([^)]*) //g' | sed 's/^.* ERROR \[.*] //g' | sort | uniq -c -w 150 | sort -nr | tee -a $ERROR_DEST
 
 #clean up extras
 rm -rf $TRIM_FILE
