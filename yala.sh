@@ -189,6 +189,7 @@ if [ "$UPDATE_MODE" != "never" ]; then
 
             if [ "$UPDATE" = "true" ]; then
                 wget -q $REMOTE_YALA_ERRORS -O $DIR/$YALA_ERRORS
+                rm -r $ERRORS_DIR
                 tar -xf $YALA_ERRORS
                 chmod -R 755 $SCRIPTS_DIR
             fi
@@ -234,11 +235,11 @@ echo
 }  | tee -a $DEST
 
 echo -en "${BLUE}"
-echo -e "*** First and last lines of $FILE_NAME ***" | tee -a $DEST
+echo -e "*** First and last timestamped lines of $FILE_NAME ***" | tee -a $DEST
 echo -en "${NC}"
 {
-head -n 1 "$TRIM_FILE"
-tail -n 1 "$TRIM_FILE"
+head -n 1000 "$TRIM_FILE" | grep -E "^20[0-9][0-9]\-|^[0-2][0-9]:[0-5][0-9]:[0-5][0-9]" | head -n 1
+tail -n 1000 "$TRIM_FILE" | grep -E "^20[0-9][0-9]\-|^[0-2][0-9]:[0-5][0-9]:[0-5][0-9]" | tail -n 1
 echo
 }  | tee -a $DEST
 
@@ -261,6 +262,7 @@ echo -en "${BLUE}"
 echo -e "*** Start and stop events of $FILE_NAME ***" | tee -a $DEST
 echo -en "${NC}"
 
+# WFLYSRV0025 - started
 # WFLYSRV0026 - started
 # WFLYSRV0049 - starting
 # WFLYSRV0050 - stopped
@@ -277,7 +279,7 @@ echo -en "${NC}"
 # WFLYSRV0283 - disregardingNonGraceful
 # WFLYSRV0272 - suspending
 {
-grep -E "WFLYSRV0026|WFLYSRV0049|WFLYSRV0050|WFLYSRV0211|WFLYSRV0212|WFLYSRV0215|WFLYSRV0220|WFLYSRV0236|WFLYSRV0239|WFLYSRV0240|WFLYSRV0241|WFLYSRV0260|WFLYSRV0272|WFLYSRV0282|WFLYSRV0283" $TRIM_FILE
+grep -E "WFLYSRV0025|WFLYSRV0026|WFLYSRV0049|WFLYSRV0050|WFLYSRV0211|WFLYSRV0212|WFLYSRV0215|WFLYSRV0220|WFLYSRV0236|WFLYSRV0239|WFLYSRV0240|WFLYSRV0241|WFLYSRV0260|WFLYSRV0272|WFLYSRV0282|WFLYSRV0283" $TRIM_FILE
 echo
 } | tee -a $DEST
 
